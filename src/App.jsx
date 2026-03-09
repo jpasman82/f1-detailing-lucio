@@ -9,30 +9,26 @@ import {
 
 // --- SISTEMA DE DETECCIÓN DE CONFIGURACIÓN ROBUSTO ---
 let firebaseConfig = null;
+let debugInfo = "No se detectó configuración";
 
 try {
-  // 1. Buscamos en las variables de Vite (Vercel)
   const envValue = import.meta.env.VITE_FIREBASE_CONFIG;
-  
-  // 2. Buscamos en el entorno de simulación (Canvas)
   const simValue = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-
   const rawConfig = envValue || simValue;
 
   if (rawConfig) {
-    // Si es un string (caso Vercel), lo limpiamos de espacios y lo parseamos
     if (typeof rawConfig === 'string') {
-      const cleanJson = rawConfig.trim();
-      firebaseConfig = JSON.parse(cleanJson);
+      firebaseConfig = JSON.parse(rawConfig.trim());
+      debugInfo = "Configuración cargada desde Vercel";
     } else {
       firebaseConfig = rawConfig;
+      debugInfo = "Configuración cargada desde Simulación";
     }
   }
 } catch (e) {
-  console.error("Error crítico parseando Firebase Config:", e);
+  debugInfo = "Error parseando JSON: " + e.message;
 }
 
-// Inicialización segura
 const hasConfig = firebaseConfig && firebaseConfig.apiKey;
 const app = hasConfig ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
@@ -76,7 +72,7 @@ const App = () => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), date: doc.data().date?.toDate() || new Date() }));
       setWashes(data.sort((a, b) => b.date - a.date));
       setLoading(false);
-    });
+    }, (err) => console.error("Firestore error:", err));
 
     const expensesRef = collection(db, 'artifacts', appId, 'public', 'data', 'expenses');
     const unsubExpenses = onSnapshot(expensesRef, (snapshot) => {
@@ -132,19 +128,29 @@ const App = () => {
         <AlertCircle size={60} className="text-red-500 mb-6 animate-bounce" />
         <h1 className="text-2xl font-black italic uppercase mb-4 tracking-tighter">Falta Configuración</h1>
         <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 text-left space-y-4 max-w-sm">
-          <p className="text-xs text-slate-400">Vercel no está detectando la variable. Chequea esto:</p>
+          <p className="text-xs text-slate-400">Estado: <span className="text-red-400 font-bold">{debugInfo}</span></p>
           <ul className="text-[11px] space-y-2 text-slate-300">
-            <li>• Key: <code className="text-red-400">VITE_FIREBASE_CONFIG</code></li>
+            <li>• Key: <code className="text-red-400 font-bold">VITE_FIREBASE_CONFIG</code></li>
             <li>• Value: ¿Empieza con <code className="text-green-400">{"{"}</code> y termina con <code className="text-green-400">{"}"}</code>?</li>
-            <li>• ¿Le diste al botón <b>Save</b> en Vercel?</li>
-            <li>• ¿Hiciste un <b>Redeploy</b> después de guardar?</li>
+            <li>• ¿Hiciste el <b>Redeploy</b> en Vercel después de guardar?</li>
           </ul>
         </div>
+        <button 
+          onClick={() => window.location.reload()} 
+          className="mt-8 text-[10px] font-black uppercase tracking-widest text-slate-500 border border-slate-800 px-6 py-2 rounded-full"
+        >
+          Reintentar Conexión
+        </button>
       </div>
     );
   }
 
-  if (loading) return <div className="h-screen bg-slate-950 flex items-center justify-center text-red-600 font-black italic animate-pulse tracking-tighter text-2xl uppercase">Entrando a Pits...</div>;
+  if (loading) return (
+    <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
+      <Zap className="text-red-600 animate-pulse" size={48} />
+      <span className="text-red-600 font-black italic tracking-tighter text-xl uppercase">Sincronizando con Boxes...</span>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-36">
@@ -157,10 +163,10 @@ const App = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black italic tracking-tighter leading-none uppercase">F1 Detailing</h1>
-              <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest mt-1 opacity-80">Lucio's Team</p>
+              <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest mt-1 opacity-80 leading-none">Lucio's Team</p>
             </div>
           </div>
-          <Trophy className="text-yellow-400" size={28} />
+          <Trophy className="text-yellow-400 drop-shadow-lg" size={28} />
         </div>
       </header>
 
@@ -176,7 +182,7 @@ const App = () => {
                 <div className="font-black italic text-xl text-green-400">%{stats.progressPercent.toFixed(1)}</div>
               </div>
               <div className="h-5 w-full bg-slate-800 rounded-full overflow-hidden p-1 border border-slate-700">
-                <div className="h-full bg-gradient-to-r from-red-600 via-yellow-500 to-green-500 rounded-full transition-all duration-1000" style={{ width: `${stats.progressPercent}%` }} />
+                <div className="h-full bg-gradient-to-r from-red-600 via-yellow-500 to-green-500 rounded-full transition-all duration-1000 shadow-[0_0_15px_rgba(220,38,38,0.3)]" style={{ width: `${stats.progressPercent}%` }} />
               </div>
               <div className="mt-6 flex gap-3 text-center">
                 <div className="flex-1 bg-black/40 p-4 rounded-3xl border border-slate-800/50">
@@ -194,7 +200,7 @@ const App = () => {
               <div className="space-y-1">
                 <h3 className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Ritmo Semanal</h3>
                 <p className="text-3xl font-black italic text-white leading-none">{stats.weeklyCount} <span className="text-base text-slate-600 font-normal">/ {WEEKLY_GOAL_COUNT}</span></p>
-                <p className="text-[10px] font-bold text-slate-400 italic mt-1 uppercase">
+                <p className="text-[10px] font-bold text-slate-400 italic mt-1 uppercase leading-none">
                   {stats.weeklyCount >= WEEKLY_GOAL_COUNT ? '🏁 ¡Meta cumplida!' : `Faltan ${WEEKLY_GOAL_COUNT - stats.weeklyCount} autos`}
                 </p>
               </div>
@@ -208,12 +214,12 @@ const App = () => {
             </section>
 
             <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => addWash('ext')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3">
-                <Car className="text-blue-500" size={32} />
+              <button onClick={() => addWash('ext')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3 group">
+                <div className="bg-blue-600/10 p-3 rounded-2xl group-active:scale-90 transition-transform"><Car className="text-blue-500" size={32} /></div>
                 <span className="font-black italic text-xl text-white tracking-tighter leading-none">$420</span>
               </button>
-              <button onClick={() => addWash('full')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3">
-                <CheckCircle className="text-green-500" size={32} />
+              <button onClick={() => addWash('full')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3 group">
+                <div className="bg-green-600/10 p-3 rounded-2xl group-active:scale-90 transition-transform"><CheckCircle className="text-green-500" size={32} /></div>
                 <span className="font-black italic text-xl text-white tracking-tighter leading-none">$850</span>
               </button>
             </div>
@@ -265,7 +271,7 @@ const App = () => {
       {isAddingExpense && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="bg-slate-900 w-full max-w-xs rounded-[3rem] border border-slate-800 p-8 shadow-2xl relative overflow-hidden">
-            <h3 className="text-2xl font-black italic uppercase text-red-500 mb-6 tracking-tighter">Pit Stop: Gasto</h3>
+            <h3 className="text-2xl font-black italic uppercase text-red-500 mb-6 tracking-tighter leading-none">Pit Stop: Gasto</h3>
             <form onSubmit={handleAddExpense} className="space-y-5 relative z-10">
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">¿Qué compraste?</label>
@@ -276,8 +282,8 @@ const App = () => {
                 <input type="number" placeholder="0" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-3xl font-black italic focus:outline-none focus:border-red-600" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
               </div>
               <div className="flex gap-4 pt-6">
-                <button type="button" onClick={() => setIsAddingExpense(false)} className="flex-1 font-black text-slate-600 uppercase text-xs tracking-widest">Cancelar</button>
-                <button type="submit" className="flex-1 p-5 bg-red-700 rounded-2xl font-black text-white uppercase text-xs shadow-xl active:scale-95 transition-transform">Confirmar</button>
+                <button type="button" onClick={() => setIsAddingExpense(false)} className="flex-1 font-black text-slate-600 uppercase text-xs tracking-widest leading-none">Cancelar</button>
+                <button type="submit" className="flex-1 p-5 bg-red-700 rounded-2xl font-black text-white uppercase text-xs shadow-xl active:scale-95 transition-transform leading-none">Confirmar</button>
               </div>
             </form>
           </div>
