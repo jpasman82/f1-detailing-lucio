@@ -5,7 +5,8 @@ import { getFirestore, collection, doc, onSnapshot, addDoc, deleteDoc, setDoc, s
 import { 
   Trophy, Car, LayoutDashboard, History, 
   Trash2, Receipt, Zap, AlertCircle, 
-  Settings, Plus, Database, TriangleAlert
+  Settings, Plus, Database, TriangleAlert,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 // --- 1. SISTEMA ANTICRASH ---
@@ -68,16 +69,26 @@ const parseSafeDate = (val) => {
   }
 };
 
+// Formateador de Fechas
+const formatWeek = (start, end) => {
+  const opts = { month: 'short', day: 'numeric' };
+  return `${start.toLocaleDateString('es-ES', opts)} al ${end.toLocaleDateString('es-ES', opts)}`;
+};
+
 // --- 3. APLICACIÓN PRINCIPAL ---
 const AppContent = () => {
   const [user, setUser] = useState(null);
   const [washes, setWashes] = useState([]);
   const [expenses, setExpenses] = useState([]);
-  // Configuración con precios base ajustables
-  const [config, setConfig] = useState({ exchangeRate: 40, priceExt: 420, priceFull: 850 });
+  
+  // Configuración con meta de autos agregada
+  const [config, setConfig] = useState({ exchangeRate: 40, priceExt: 420, priceFull: 850, weeklyGoal: 9 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Navegación Semanal (0 = actual, -1 = pasada, etc.)
+  const [weekOffset, setWeekOffset] = useState(0);
   
   // Estados de carga de formularios (Anti Doble Clic)
   const [isSubmittingWash, setIsSubmittingWash] = useState(false);
@@ -119,7 +130,8 @@ const AppContent = () => {
         setConfig(prev => ({ 
           exchangeRate: Number(data.exchangeRate) || prev.exchangeRate, 
           priceExt: Number(data.priceExt) || prev.priceExt,
-          priceFull: Number(data.priceFull) || prev.priceFull
+          priceFull: Number(data.priceFull) || prev.priceFull,
+          weeklyGoal: Number(data.weeklyGoal) || prev.weeklyGoal
         }));
       }
     });
@@ -157,17 +169,92 @@ const AppContent = () => {
   // Cálculos Correctos
   const stats = useMemo(() => {
     const exRate = Math.max(Number(config.exchangeRate) || 40, 1);
+    const weeklyGoal = Math.max(Number(config.weeklyGoal) || 9, 1);
 
     const totalSales = washes.reduce((sum, w) => sum + (Number(w.price) || 0) - (Number(w.discount) || 0), 0);
     const totalTips = washes.reduce((sum, w) => sum + (Number(w.tip) || 0), 0);
     const totalExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const totalNephewPay = washes.length * config.priceExt; // O el pago acordado, aquí lo calculábamos según la caja. 
+    // Nota: Dejamos la variable de sueldo viejo mapeada por si acaso, pero el Prompt dice que ya configuramos los precios base.
     
+    // El Net Profit que se va sumando para la meta (Caja Base - Gastos)
     const netProfitUYU = totalSales - totalExpenses;
     const netProfitUSD = netProfitUYU / exRate;
     const progressPercent = Math.min(Math.max((netProfitUSD / GOAL_USD) * 100, 0), 100);
+    const remainingUSD = Math.max(GOAL_USD - netProfitUSD, 0);
 
-    return { totalSales, totalExpenses, totalTips, netProfitUSD, progressPercent, remainingUSD: Math.max(GOAL_USD - netProfitUSD, 0) };
-  }, [washes, expenses, config]);
+    // --- LÓGICA DE SEMANAS ---
+    const today = new Date();
+    const startOfCurrentWeek = new Date(today);
+    startOfCurrentWeek.setHours(0,0,0,0);
+    const currentDayOfWeek = startOfCurrentWeek.getDay() || 7; // Dom=7, Lun=1
+    startOfCurrentWeek.setDate(startOfCurrentWeek.getDate() - (currentDayOfWeek - 1)); // Lunes
+
+    const startOfSelectedWeek = new Date(startOfCurrentWeek);
+    startOfSelectedWeek.setDate(startOfSelectedWeek.getDate() + (weekOffset * 7));
+    const endOfSelectedWeek = new Date(startOfSelectedWeek);
+    endOfSelectedWeek.setDate(endOfSelectedWeek.getDate() + 6);
+    endOfSelectedWeek.setHours(23,59,59,999);
+
+    const washesThisWeek = washes.filter(w => w.date >= startOfSelectedWeek && w.date <= endOfSelectedWeek);
+    const carsThisWeek = washesThisWeek.length;
+
+    // Cálculo de Ritmo Ideal (Pacing)
+    let expectedCars = weeklyGoal;
+    if (weekOffset === 0) {
+      // Si estamos a mitad de la semana actual, promediamos según qué día es
+      expectedCars = Math.round((weeklyGoal / 7) * currentDayOfWeek);
+    } else if (weekOffset > 0) {
+      expectedCars = 0; // Semanas futuras todavía no empezaron
+    }
+
+    const paceDiff = carsThisWeek - expectedCars;
+    let paceText = "";
+    if (weekOffset > 0) paceText = "Semana futura";
+    else if (paceDiff > 0) paceText = `🔥 Adelantado por ${paceDiff} auto${paceDiff > 1 ? 's' : ''}`;
+    else if (paceDiff < 0) paceText = `⚠️ Atrasado por ${Math.abs(paceDiff)} auto${Math.abs(paceDiff) > 1 ? 's' : ''}`;
+    else paceText = `✅ Ritmo ideal`;
+
+    // --- LÓGICA DE PROYECCIÓN (ETA) ---
+    // Usamos el valor Full Service para la proyección
+    const profitPerFullCarUYU = config.priceFull; 
+    const profitPerFullCarUSD = profitPerFullCarUYU / exRate;
+    const projectedWeeklyProfitUSD = profitPerFullCarUSD * weeklyGoal;
+
+    let etaText = "";
+    if (remainingUSD <= 0) {
+      etaText = "¡OBJETIVO CUMPLIDO!";
+    } else if (projectedWeeklyProfitUSD > 0) {
+      const weeksLeft = remainingUSD / projectedWeeklyProfitUSD;
+      const daysLeft = Math.round(weeksLeft * 7);
+      const monthsLeft = Math.floor(daysLeft / 30);
+      const remDays = daysLeft % 30;
+      
+      let timeParts = [];
+      if (monthsLeft > 0) timeParts.push(`${monthsLeft} mes${monthsLeft > 1 ? 'es' : ''}`);
+      if (remDays > 0 || monthsLeft === 0) timeParts.push(`${remDays} día${remDays !== 1 ? 's' : ''}`);
+      
+      etaText = `Faltan aprox. ${timeParts.join(' y ')} para la meta`;
+    } else {
+      etaText = "Rentabilidad insuficiente para proyectar";
+    }
+
+    return { 
+      totalSales, 
+      totalExpenses, 
+      totalTips, 
+      netProfitUSD, 
+      progressPercent, 
+      remainingUSD,
+      startOfSelectedWeek,
+      endOfSelectedWeek,
+      carsThisWeek,
+      weeklyGoal,
+      weeklyPercent: Math.min((carsThisWeek / weeklyGoal) * 100, 100),
+      paceText,
+      etaText
+    };
+  }, [washes, expenses, config, weekOffset]);
 
   // Funciones de acción
   const handleOpenWashModal = () => {
@@ -285,7 +372,7 @@ const AppContent = () => {
               <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full -mr-16 -mt-16 blur-3xl opacity-50"></div>
               <div className="flex justify-between items-start mb-4 relative z-10">
                 <div className="space-y-1">
-                  <h2 className="text-[10px] uppercase font-black text-slate-500 tracking-widest leading-none">Ahorro Neto en Banco</h2>
+                  <h2 className="text-[10px] uppercase font-black text-slate-500 tracking-widest leading-none">Total Recaudado</h2>
                   <p className="text-5xl font-black text-white italic tracking-tighter leading-none">
                     ${Math.round(stats.netProfitUSD)} <span className="text-sm text-slate-600 not-italic uppercase">USD</span>
                   </p>
@@ -304,29 +391,59 @@ const AppContent = () => {
                     style={{ width: `${stats.progressPercent}%` }} 
                   />
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-bold italic text-slate-500 uppercase">
-                  <span>{stats.remainingUSD > 0 ? `Faltan $${Math.round(stats.remainingUSD)} USD` : '🏆 Meta alcanzada'}</span>
-                  <span className="text-green-500">%{stats.progressPercent.toFixed(1)}</span>
+                <div className="text-center mt-2">
+                  <p className="text-[10px] font-bold italic text-slate-400 uppercase tracking-widest">
+                    {stats.etaText}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Contador de Autos Semanal */}
+            <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl">
+              <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-4">
+                <button onClick={() => setWeekOffset(w => w - 1)} className="p-2 text-slate-500 hover:text-white transition-colors"><ChevronLeft size={20}/></button>
+                <div className="text-center">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-white">
+                    {weekOffset === 0 ? 'Esta Semana' : weekOffset === -1 ? 'Semana Pasada' : weekOffset === 1 ? 'Próxima Semana' : `Semana ${weekOffset}`}
+                  </p>
+                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">
+                    {formatWeek(stats.startOfSelectedWeek, stats.endOfSelectedWeek)}
+                  </p>
+                </div>
+                <button onClick={() => setWeekOffset(w => w + 1)} className="p-2 text-slate-500 hover:text-white transition-colors"><ChevronRight size={20}/></button>
+              </div>
+              <div className="flex justify-between items-center px-2">
+                <div>
+                  <h3 className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Autos Lavados</h3>
+                  <p className="text-4xl font-black italic text-white leading-none tracking-tighter mt-1">
+                    {stats.carsThisWeek} <span className="text-xl text-slate-600 font-normal">/ {stats.weeklyGoal}</span>
+                  </p>
+                  <p className="text-[9px] font-bold text-slate-400 italic mt-2 uppercase tracking-widest">
+                    {stats.paceText}
+                  </p>
+                </div>
+                <div className="relative w-20 h-20 flex items-center justify-center">
+                  <svg className="absolute inset-0 w-full h-full -rotate-90">
+                    <circle cx="40" cy="40" r="35" stroke="#1e293b" strokeWidth="8" fill="none" />
+                    <circle cx="40" cy="40" r="35" stroke="#dc2626" strokeWidth="8" fill="none" strokeDasharray="220" strokeDashoffset={220 - (220 * stats.weeklyPercent / 100)} strokeLinecap="round" className="transition-all duration-1000" />
+                  </svg>
+                  <span className="font-black italic text-sm text-white">%{Math.round(stats.weeklyPercent)}</span>
                 </div>
               </div>
             </section>
 
             {/* Cajas de Pesos */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
-                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Caja Bruta (UYU)</p>
-                <p className="text-2xl font-black italic text-blue-400 tracking-tighter">${Math.round(stats.totalSales).toLocaleString()}</p>
+              <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex flex-col justify-center">
+                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Efectivo (UYU)</p>
+                <p className="text-2xl font-black italic text-blue-400 tracking-tighter">${Math.round(stats.totalSales + stats.totalTips).toLocaleString()}</p>
+                <p className="text-[9px] text-slate-600 mt-1 uppercase tracking-widest font-bold">Incluye propinas</p>
               </div>
-              <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
+              <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex flex-col justify-center">
                 <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Gastos (UYU)</p>
                 <p className="text-2xl font-black italic text-red-500 tracking-tighter">-${Math.round(stats.totalExpenses).toLocaleString()}</p>
-              </div>
-              <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 col-span-2 flex justify-between items-center">
-                <div>
-                  <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Propinas Lucio</p>
-                  <p className="text-[10px] text-slate-400">Extra, no se cuenta en el ahorro.</p>
-                </div>
-                <p className="text-3xl font-black italic text-green-400 tracking-tighter">+${Math.round(stats.totalTips).toLocaleString()}</p>
+                <p className="text-[9px] text-slate-600 mt-1 uppercase tracking-widest font-bold">Insumos y extra</p>
               </div>
             </div>
 
@@ -334,17 +451,17 @@ const AppContent = () => {
             <div className="grid grid-cols-2 gap-5">
               <button onClick={handleOpenWashModal} className="bg-red-700 p-8 rounded-[3rem] border-b-8 border-black active:translate-y-2 active:border-b-0 transition-all flex flex-col items-center gap-4 group">
                 <Plus className="text-white group-active:scale-90" size={32} />
-                <span className="font-black italic uppercase text-xs text-white">Nuevo Lavado</span>
+                <span className="font-black italic uppercase text-xs text-white tracking-widest">Nuevo Lavado</span>
               </button>
               <button onClick={() => setShowExpenseModal(true)} className="bg-slate-900 p-8 rounded-[3rem] border-b-8 border-black active:translate-y-2 active:border-b-0 transition-all flex flex-col items-center gap-4 group shadow-xl">
                 <Receipt className="text-slate-400 group-active:scale-90" size={32} />
-                <span className="font-black italic uppercase text-xs text-slate-400">Gasto Insumos</span>
+                <span className="font-black italic uppercase text-xs text-slate-400 tracking-widest">Gasto Insumos</span>
               </button>
             </div>
           </>
         ) : (
           <div className="space-y-4 pt-2">
-            <h2 className="text-3xl font-black italic uppercase flex items-center gap-3 mb-8 px-2">
+            <h2 className="text-3xl font-black italic uppercase flex items-center gap-3 mb-8 px-2 tracking-tighter">
               <History className="text-red-600" /> Historial
             </h2>
             {(washes.length === 0 && expenses.length === 0) ? (
@@ -360,7 +477,7 @@ const AppContent = () => {
                   const valTip = Number(item.tip) || 0;
                   const valAmount = Number(item.amount) || 0;
                   const displayDate = item.date instanceof Date ? item.date.toLocaleDateString() : '--/--/----';
-                  const finalAmount = isWash ? (valPrice - valDisc) : valAmount;
+                  const finalAmount = isWash ? (valPrice - valDisc + valTip) : valAmount;
 
                   return (
                     <div key={item.id} className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 flex justify-between items-center group">
@@ -412,22 +529,22 @@ const AppContent = () => {
             <form onSubmit={handleAddWash} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <button type="button" onClick={() => setWashForm({...washForm, type: 'Exterior', price: config.priceExt})}
-                  className={`p-4 rounded-2xl font-black uppercase text-[10px] border-2 ${washForm.type === 'Exterior' ? 'border-red-600 bg-red-600/10 text-white' : 'border-slate-800 text-slate-500'}`}
+                  className={`p-4 rounded-2xl font-black uppercase text-[10px] border-2 tracking-widest transition-colors ${washForm.type === 'Exterior' ? 'border-red-600 bg-red-600/10 text-white' : 'border-slate-800 text-slate-500'}`}
                 >Exterior</button>
                 <button type="button" onClick={() => setWashForm({...washForm, type: 'Full Service', price: config.priceFull})}
-                  className={`p-4 rounded-2xl font-black uppercase text-[10px] border-2 ${washForm.type === 'Full Service' ? 'border-red-600 bg-red-600/10 text-white' : 'border-slate-800 text-slate-500'}`}
+                  className={`p-4 rounded-2xl font-black uppercase text-[10px] border-2 tracking-widest transition-colors ${washForm.type === 'Full Service' ? 'border-red-600 bg-red-600/10 text-white' : 'border-slate-800 text-slate-500'}`}
                 >Full</button>
               </div>
               
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Detalle (Cliente/Auto)</label>
-                <input type="text" placeholder="Ej: VW Golf - Juan" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-bold text-sm" 
+                <input type="text" placeholder="Ej: VW Golf - Juan" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-bold text-sm focus:border-red-600 outline-none" 
                   value={washForm.detail} onChange={e => setWashForm({...washForm, detail: e.target.value})}/>
               </div>
 
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio Base ($ UYU)</label>
-                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-xl" 
+                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-xl focus:border-red-600 outline-none" 
                   value={washForm.price === 0 ? '' : washForm.price} 
                   onChange={e => setWashForm({...washForm, price: e.target.value === '' ? 0 : Number(e.target.value)})}/>
               </div>
@@ -435,13 +552,13 @@ const AppContent = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Dcto ($)</label>
-                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-red-500 font-black italic" 
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-red-500 font-black italic focus:border-red-600 outline-none" 
                     value={washForm.discount === 0 ? '' : washForm.discount} 
                     onChange={e => setWashForm({...washForm, discount: e.target.value === '' ? 0 : Number(e.target.value)})}/>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Propa ($)</label>
-                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-green-500 font-black italic" 
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-green-500 font-black italic focus:border-red-600 outline-none" 
                     value={washForm.tip === 0 ? '' : washForm.tip} 
                     onChange={e => setWashForm({...washForm, tip: e.target.value === '' ? 0 : Number(e.target.value)})}/>
                 </div>
@@ -468,30 +585,40 @@ const AppContent = () => {
               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global'), {
                 exchangeRate: Number(config.exchangeRate) || 40,
                 priceExt: Number(config.priceExt) || 420,
-                priceFull: Number(config.priceFull) || 850
+                priceFull: Number(config.priceFull) || 850,
+                weeklyGoal: Number(config.weeklyGoal) || 9
               });
               setShowSettings(false);
-            }} className="space-y-6">
+            }} className="space-y-5">
               
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Cotización Dólar</label>
                 <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-lg" 
                   value={config.exchangeRate} onChange={e => setConfig({...config, exchangeRate: e.target.value})}/>
               </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio Base: Exterior ($)</label>
-                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-lg" 
-                  value={config.priceExt} onChange={e => setConfig({...config, priceExt: e.target.value})}/>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio: Exterior</label>
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-lg" 
+                    value={config.priceExt} onChange={e => setConfig({...config, priceExt: e.target.value})}/>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio: Full</label>
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-lg" 
+                    value={config.priceFull} onChange={e => setConfig({...config, priceFull: e.target.value})}/>
+                </div>
               </div>
+
               <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio Base: Full ($)</label>
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Meta Semanal (Cant. Autos)</label>
                 <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black italic text-lg" 
-                  value={config.priceFull} onChange={e => setConfig({...config, priceFull: e.target.value})}/>
+                  value={config.weeklyGoal} onChange={e => setConfig({...config, weeklyGoal: e.target.value})}/>
               </div>
 
               <div className="pt-4 border-t border-slate-800">
                 <button type="button" onClick={handleDeleteAll} className="w-full bg-red-950/40 border border-red-900 text-red-500 p-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-red-900/60 transition-colors">
-                  <TriangleAlert size={16} /> Borrar Todo El Historial
+                  <TriangleAlert size={16} /> Borrar Historial
                 </button>
               </div>
 
@@ -510,10 +637,10 @@ const AppContent = () => {
           <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10 shadow-2xl">
             <h3 className="text-3xl font-black italic uppercase text-red-500 mb-8 leading-none tracking-tighter">Nuevo Gasto</h3>
             <form onSubmit={handleAddExpense} className="space-y-6">
-              <input type="text" placeholder="¿Qué compraste?" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-bold text-lg" 
+              <input type="text" placeholder="¿Qué compraste?" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-bold text-lg focus:border-red-600 outline-none" 
                 value={expenseForm.desc} 
                 onChange={e => setExpenseForm({...expenseForm, desc: e.target.value})} />
-              <input type="number" placeholder="Monto UYU" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-4xl font-black italic" 
+              <input type="number" placeholder="Monto UYU" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-4xl font-black italic focus:border-red-600 outline-none" 
                 value={expenseForm.amount} 
                 onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
               <div className="flex gap-4 pt-8">
