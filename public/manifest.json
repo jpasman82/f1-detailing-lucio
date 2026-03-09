@@ -1,0 +1,17 @@
+{
+  "name": "F1 Detailing",
+  "short_name": "F1 Detailing",
+  "description": "Tracker de Lavados y Boxes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#b91c1c",
+  "icons": [
+    {
+      "src": "/car-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
