@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Component } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, onSnapshot, addDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -8,7 +8,41 @@ import {
   Settings, Plus, Database
 } from 'lucide-react';
 
-// --- CONFIGURACIÓN DE SEGURIDAD ---
+// --- SISTEMA ANTICRASH (CAJA NEGRA) ---
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("Error capturado por la Caja Negra:", error, errorInfo);
+    this.setState({ errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 p-8 text-white font-sans flex flex-col justify-center">
+          <AlertCircle size={64} className="text-red-500 mb-6 mx-auto" />
+          <h1 className="text-3xl font-black italic uppercase text-center mb-2">Error de Sistema</h1>
+          <p className="text-center text-slate-400 text-sm mb-6">La app detectó un dato corrupto y se detuvo por seguridad.</p>
+          <div className="bg-red-950/30 p-5 rounded-2xl border border-red-900 overflow-auto text-xs text-red-200 font-mono">
+            <p className="font-bold mb-2">{this.state.error && this.state.error.toString()}</p>
+            <p className="opacity-70">{this.state.errorInfo && this.state.errorInfo.componentStack}</p>
+          </div>
+          <button onClick={() => window.location.reload()} className="mt-8 bg-red-600 p-4 rounded-xl font-black uppercase tracking-widest text-xs active:scale-95 transition-transform">
+            Reiniciar Sistema
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// --- CONFIGURACIÓN DE FIREBASE ---
 let firebaseConfig = null;
 try {
   const envValue = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FIREBASE_CONFIG : null;
@@ -27,7 +61,19 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'f1-detailing-lucio-v
 
 const GOAL_USD = 1000;
 
-const App = () => {
+// Utilidad para limpiar fechas corruptas
+const parseSafeDate = (val) => {
+  try {
+    if (!val) return new Date();
+    if (typeof val.toDate === 'function') return val.toDate();
+    if (val instanceof Date) return val;
+    return new Date(val); // Intenta parsear si es un string viejo
+  } catch (e) {
+    return new Date();
+  }
+};
+
+const MainApp = () => {
   const [user, setUser] = useState(null);
   const [washes, setWashes] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -65,39 +111,53 @@ const App = () => {
 
     const configRef = doc(db, 'artifacts', appId, 'public', 'config', 'global');
     const unsubConfig = onSnapshot(configRef, (doc) => {
-      if (doc.exists()) setConfig(prev => ({ ...prev, ...doc.data() }));
+      if (doc.exists()) {
+        const data = doc.data();
+        setConfig(prev => ({ 
+          exchangeRate: Number(data.exchangeRate) || prev.exchangeRate, 
+          nephewPay: Number(data.nephewPay) || prev.nephewPay 
+        }));
+      }
     });
 
     const washesRef = collection(db, 'artifacts', appId, 'public', 'data', 'washes');
     const unsubWashes = onSnapshot(washesRef, (snap) => {
       try {
-        const data = snap.docs.map(d => ({ 
-          id: d.id, 
-          ...d.data(), 
-          date: d.data().date?.toDate() || new Date() 
-        }));
+        const data = snap.docs.map(d => {
+          const raw = d.data();
+          return { id: d.id, ...raw, date: parseSafeDate(raw.date) };
+        });
         setWashes(data.sort((a,b) => b.date - a.date));
         setLoading(false);
       } catch (e) {
-        console.error("Error procesando lavados:", e);
+        setError("Error filtrando lavados: " + e.message);
+        setLoading(false);
       }
     }, (err) => {
-      setError("Error de base de datos: " + err.message);
+      setError("Error de permisos: " + err.message);
       setLoading(false);
     });
 
     const expensesRef = collection(db, 'artifacts', appId, 'public', 'data', 'expenses');
     const unsubExpenses = onSnapshot(expensesRef, (snap) => {
-      setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data(), date: d.data().date?.toDate() || new Date() })));
+      try {
+        const data = snap.docs.map(d => {
+          const raw = d.data();
+          return { id: d.id, ...raw, date: parseSafeDate(raw.date) };
+        });
+        setExpenses(data.sort((a,b) => b.date - a.date));
+      } catch (e) {
+        console.error("Error en gastos:", e);
+      }
     });
 
     return () => { unsubConfig(); unsubWashes(); unsubExpenses(); };
   }, [user]);
 
-  // Cálculos ultra-seguros contra errores matemáticos
+  // Cálculos Ultra-Blindados contra datos basura (NaN, strings, nulos)
   const stats = useMemo(() => {
-    const exRate = Math.max(Number(config?.exchangeRate) || 40, 1);
-    const nepPay = Number(config?.nephewPay) || 850;
+    const exRate = Math.max(Number(config.exchangeRate) || 40, 1);
+    const nepPay = Number(config.nephewPay) || 850;
 
     const totalSales = (washes || []).reduce((sum, w) => {
       const p = Number(w.price) || 0;
@@ -127,7 +187,10 @@ const App = () => {
     e.preventDefault();
     if (!db) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'washes'), {
-      ...washForm,
+      type: String(washForm.type || 'Lavado'),
+      price: Number(washForm.price) || 0,
+      discount: Number(washForm.discount) || 0,
+      tip: Number(washForm.tip) || 0,
       date: serverTimestamp(),
       userId: user.uid
     });
@@ -152,7 +215,7 @@ const App = () => {
   if (loading) return (
     <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
       <Zap className="text-red-600 animate-pulse" size={50} />
-      <p className="text-red-600 font-black italic uppercase tracking-widest text-xl">Sincronizando Boxes...</p>
+      <p className="text-red-600 font-black italic uppercase tracking-widest text-xl">Revisando Motores...</p>
     </div>
   );
 
@@ -220,11 +283,11 @@ const App = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
                 <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Caja Total ($)</p>
-                <p className="text-2xl font-black italic text-blue-400 tracking-tighter">${stats.totalSales.toLocaleString()}</p>
+                <p className="text-2xl font-black italic text-blue-400 tracking-tighter">${Math.round(stats.totalSales).toLocaleString()}</p>
               </div>
               <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
                 <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Sueldo Lucio ($)</p>
-                <p className="text-2xl font-black italic text-red-500 tracking-tighter">-${stats.totalNephewPay.toLocaleString()}</p>
+                <p className="text-2xl font-black italic text-red-500 tracking-tighter">-${Math.round(stats.totalNephewPay).toLocaleString()}</p>
               </div>
             </div>
 
@@ -255,30 +318,42 @@ const App = () => {
             ) : (
               [...washes.map(w => ({...w, t: 'w'})), ...expenses.map(e => ({...e, t: 'e'}))]
                 .sort((a,b) => b.date - a.date)
-                .map(item => (
-                  <div key={item.id} className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 flex justify-between items-center group">
-                    <div className="flex items-center gap-4">
-                      <div className={`p-3 rounded-2xl ${item.t === 'w' ? 'bg-blue-600/10 text-blue-500' : 'bg-red-600/10 text-red-500'}`}>
-                        {item.t === 'w' ? <Car size={26} /> : <Receipt size={26} />}
+                .map(item => {
+                  // Mapeo ultra seguro de datos visuales
+                  const isWash = item.t === 'w';
+                  const title = isWash ? String(item.type || 'LAVADO') : String(item.description || 'GASTO');
+                  const valPrice = Number(item.price) || 0;
+                  const valDisc = Number(item.discount) || 0;
+                  const valTip = Number(item.tip) || 0;
+                  const valAmount = Number(item.amount) || 0;
+                  const displayDate = item.date instanceof Date ? item.date.toLocaleDateString() : 'FECHA INVÁLIDA';
+                  const finalAmount = isWash ? (valPrice - valDisc + valTip) : valAmount;
+
+                  return (
+                    <div key={item.id} className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 flex justify-between items-center group">
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-2xl ${isWash ? 'bg-blue-600/10 text-blue-500' : 'bg-red-600/10 text-red-500'}`}>
+                          {isWash ? <Car size={26} /> : <Receipt size={26} />}
+                        </div>
+                        <div>
+                          <p className="font-black italic text-lg uppercase leading-none text-white tracking-tight">
+                            {title}
+                          </p>
+                          <p className="text-[10px] text-slate-600 font-bold mt-2 uppercase tracking-widest">{displayDate}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-black italic text-lg uppercase leading-none text-white tracking-tight">
-                          {item.t === 'w' ? `${item.type}` : item.description}
-                        </p>
-                        <p className="text-[10px] text-slate-600 font-bold mt-2 uppercase tracking-widest">{item.date.toLocaleDateString()}</p>
+                      <div className="flex items-center gap-4 text-right">
+                        <div>
+                          <span className={`block font-black italic text-xl ${isWash ? 'text-white' : 'text-red-500'}`}>
+                            {isWash ? '+' : '-'}${Math.round(finalAmount)}
+                          </span>
+                          {isWash && valTip > 0 && <span className="text-[9px] text-green-500 font-bold uppercase">+$ {valTip} propina</span>}
+                        </div>
+                        <button onClick={() => handleDelete(item.id, isWash ? 'washes' : 'expenses')} className="text-slate-800 hover:text-red-600 p-2"><Trash2 size={20} /></button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 text-right">
-                      <div>
-                        <span className={`block font-black italic text-xl ${item.t === 'w' ? 'text-white' : 'text-red-500'}`}>
-                          {item.t === 'w' ? `+$${(Number(item.price) || 0) - (Number(item.discount) || 0) + (Number(item.tip) || 0)}` : `-$${item.amount}`}
-                        </span>
-                        {item.t === 'w' && item.tip > 0 && <span className="text-[9px] text-green-500 font-bold uppercase">+$ {item.tip} propina</span>}
-                      </div>
-                      <button onClick={() => handleDelete(item.id, item.t === 'w' ? 'washes' : 'expenses')} className="text-slate-800 hover:text-red-600 p-2"><Trash2 size={20} /></button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
             )}
           </div>
         )}
@@ -309,16 +384,22 @@ const App = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio ($ UYU)</label>
-                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" value={washForm.price} onChange={e => setWashForm({...washForm, price: parseInt(e.target.value)})}/>
+                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" 
+                  value={washForm.price === 0 ? '' : washForm.price} 
+                  onChange={e => setWashForm({...washForm, price: e.target.value === '' ? 0 : Number(e.target.value)})}/>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Dcto ($)</label>
-                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-red-500 font-black italic" value={washForm.discount} onChange={e => setWashForm({...washForm, discount: parseInt(e.target.value)})}/>
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-red-500 font-black italic" 
+                    value={washForm.discount === 0 ? '' : washForm.discount} 
+                    onChange={e => setWashForm({...washForm, discount: e.target.value === '' ? 0 : Number(e.target.value)})}/>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Propa ($)</label>
-                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-green-500 font-black italic" value={washForm.tip} onChange={e => setWashForm({...washForm, tip: parseInt(e.target.value)})}/>
+                  <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-green-500 font-black italic" 
+                    value={washForm.tip === 0 ? '' : washForm.tip} 
+                    onChange={e => setWashForm({...washForm, tip: e.target.value === '' ? 0 : Number(e.target.value)})}/>
                 </div>
               </div>
               <div className="flex gap-4 pt-4">
@@ -336,16 +417,23 @@ const App = () => {
             <h3 className="text-2xl font-black italic uppercase text-yellow-500 mb-8 tracking-tighter leading-none">Setup Boxes</h3>
             <form onSubmit={async (e) => {
               e.preventDefault();
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'config', 'global'), config);
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'config', 'global'), {
+                exchangeRate: Number(config.exchangeRate) || 40,
+                nephewPay: Number(config.nephewPay) || 850
+              });
               setShowSettings(false);
             }} className="space-y-8">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2 leading-relaxed">Cotización Dólar <br/><span className="text-slate-600">(1 USD = ? UYU)</span></label>
-                <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" value={config.exchangeRate} onChange={e => setConfig({...config, exchangeRate: parseFloat(e.target.value)})}/>
+                <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" 
+                  value={config.exchangeRate} 
+                  onChange={e => setConfig({...config, exchangeRate: e.target.value})}/>
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2 leading-relaxed">Sueldo Lucio <br/><span className="text-slate-600">(Pesos por auto)</span></label>
-                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" value={config.nephewPay} onChange={e => setConfig({...config, nephewPay: parseInt(e.target.value)})}/>
+                <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" 
+                  value={config.nephewPay} 
+                  onChange={e => setConfig({...config, nephewPay: e.target.value})}/>
               </div>
               <div className="flex gap-4 pt-6">
                 <button type="button" onClick={() => setShowSettings(false)} className="flex-1 font-black uppercase text-xs text-slate-600">Cerrar</button>
@@ -358,22 +446,26 @@ const App = () => {
 
       {showExpenseModal && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
-          <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10">
+          <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10 shadow-2xl">
             <h3 className="text-3xl font-black italic uppercase text-red-500 mb-8 leading-none tracking-tighter">Nuevo Gasto</h3>
             <form onSubmit={async (e) => {
               e.preventDefault();
               if (!expenseForm.amount) return;
               await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), {
-                description: expenseForm.desc || 'Insumos',
-                amount: parseFloat(expenseForm.amount),
+                description: String(expenseForm.desc || 'Insumos'),
+                amount: Number(expenseForm.amount) || 0,
                 date: serverTimestamp(),
                 userId: user.uid
               });
               setShowExpenseModal(false);
               setExpenseForm({ desc: '', amount: '' });
             }} className="space-y-6">
-              <input type="text" placeholder="¿Qué compraste?" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-bold text-lg" value={expenseForm.desc} onChange={e => setExpenseForm({...expenseForm, desc: e.target.value})} />
-              <input type="number" placeholder="Monto UYU" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-4xl font-black italic" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
+              <input type="text" placeholder="¿Qué compraste?" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-bold text-lg" 
+                value={expenseForm.desc} 
+                onChange={e => setExpenseForm({...expenseForm, desc: e.target.value})} />
+              <input type="number" placeholder="Monto UYU" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-4xl font-black italic" 
+                value={expenseForm.amount} 
+                onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
               <div className="flex gap-4 pt-8">
                 <button type="button" onClick={() => setShowExpenseModal(false)} className="flex-1 font-black text-slate-600 uppercase text-xs">Cerrar</button>
                 <button type="submit" className="flex-1 p-6 bg-red-700 rounded-3xl font-black uppercase text-xs text-white">Registrar</button>
@@ -386,4 +478,11 @@ const App = () => {
   );
 };
 
-export default App;
+// Envolver la app en la Caja Negra
+const SafeApp = () => (
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export default SafeApp;
