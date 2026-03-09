@@ -1,23 +1,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, query, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   Trophy, Car, LayoutDashboard, History, Target, 
   CheckCircle, Trash2, Receipt, TrendingUp, Wallet, 
   Zap, AlertCircle
 } from 'lucide-react';
 
-// Firebase Configuration - Asegúrate de configurar VITE_FIREBASE_CONFIG en Vercel Settings
-const rawConfig = typeof __firebase_config !== 'undefined' 
-  ? __firebase_config 
-  : import.meta.env?.VITE_FIREBASE_CONFIG || '{}';
+// Configuración de Seguridad
+let firebaseConfig = {};
+try {
+  const envConfig = import.meta.env.VITE_FIREBASE_CONFIG;
+  const simConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+  const configToParse = envConfig || simConfig;
+  
+  if (configToParse) {
+    firebaseConfig = typeof configToParse === 'string' ? JSON.parse(configToParse) : configToParse;
+  }
+} catch (e) {
+  console.error("Error Firebase Config:", e);
+}
 
-const firebaseConfig = typeof rawConfig === 'string' ? JSON.parse(rawConfig) : rawConfig;
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+const hasConfig = firebaseConfig && firebaseConfig.apiKey;
+const app = hasConfig ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'f1-detailing-lucio-v2';
 
 const GOAL_USD = 1000;
@@ -35,6 +43,7 @@ const App = () => {
   const [expenseForm, setExpenseForm] = useState({ desc: '', amount: '' });
 
   useEffect(() => {
+    if (!auth) { setLoading(false); return; }
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -50,7 +59,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
     const washesRef = collection(db, 'artifacts', appId, 'public', 'data', 'washes');
     const unsubWashes = onSnapshot(washesRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), date: doc.data().date?.toDate() || new Date() }));
@@ -71,24 +80,15 @@ const App = () => {
     const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
     const netProfit = totalEarnings - totalExpenses;
     const progressPercent = Math.min((netProfit / GOAL_UYU) * 100, 100);
-    
     const now = new Date();
     const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 1));
     startOfWeek.setHours(0, 0, 0, 0);
-    
     const weeklyCount = washes.filter(w => w.date >= startOfWeek).length;
-    return { 
-      totalEarnings, 
-      totalExpenses, 
-      netProfit, 
-      progressPercent, 
-      weeklyCount, 
-      weeklyPercent: Math.min((weeklyCount / WEEKLY_GOAL_COUNT) * 100, 100) 
-    };
+    return { totalEarnings, totalExpenses, netProfit, progressPercent, weeklyCount, weeklyPercent: Math.min((weeklyCount / WEEKLY_GOAL_COUNT) * 100, 100) };
   }, [washes, expenses]);
 
   const addWash = async (type) => {
-    if (!user) return;
+    if (!user || !db) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'washes'), {
       type: type === 'full' ? 'Full (Int+Ext)' : 'Exterior Solo',
       price: type === 'full' ? 850 : 420,
@@ -99,7 +99,7 @@ const App = () => {
 
   const handleAddExpense = async (e) => {
     e.preventDefault();
-    if (!user || !expenseForm.amount) return;
+    if (!user || !db || !expenseForm.amount) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), {
       description: expenseForm.desc || 'Insumos',
       amount: parseFloat(expenseForm.amount),
@@ -111,34 +111,37 @@ const App = () => {
   };
 
   const deleteItem = async (id, collectionName) => {
+    if (!db) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collectionName, id));
   };
 
-  if (loading) return <div className="h-screen bg-slate-950 flex items-center justify-center font-sans uppercase font-black italic text-red-600 tracking-tighter animate-pulse text-2xl">En Boxes...</div>;
+  if (!hasConfig) {
+    return (
+      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center p-8 text-center">
+        <AlertCircle size={48} className="text-red-500 mb-4 animate-pulse" />
+        <h1 className="text-xl font-black italic text-white uppercase mb-2">Falta Configuración</h1>
+        <p className="text-slate-400 text-sm">Agrega <code className="text-red-400 font-bold">VITE_FIREBASE_CONFIG</code> en Vercel Settings.</p>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="h-screen bg-slate-950 flex items-center justify-center text-red-600 font-black italic animate-pulse">CARGANDO BOXES...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-36">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-36 selection:bg-red-500/30">
       <header className="bg-red-700 p-6 rounded-b-[3rem] shadow-2xl border-b-4 border-black sticky top-0 z-50">
         <div className="max-w-md mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <div className="bg-white p-1 rounded-full border-2 border-black w-14 h-14 flex items-center justify-center overflow-hidden">
-              <img 
-                src="/logo.jpg" 
-                alt="F1 Logo" 
-                className="w-full h-auto object-contain" 
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'block';
-                }} 
-              />
+            <div className="bg-white p-1 rounded-full border-2 border-black w-14 h-14 flex items-center justify-center overflow-hidden shadow-inner">
+              <img src="/logo.jpg" alt="F1 Logo" className="w-full h-auto object-contain" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} />
               <Zap style={{display: 'none'}} className="text-red-600" size={24} />
             </div>
             <div>
               <h1 className="text-2xl font-black italic tracking-tighter leading-none uppercase">F1 Detailing</h1>
-              <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest mt-1 tracking-[0.2em]">Lucio's Team</p>
+              <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest mt-1 opacity-80">Lucio's Team</p>
             </div>
           </div>
-          <Trophy className="text-yellow-400" size={28} />
+          <Trophy className="text-yellow-400 drop-shadow-md" size={28} />
         </div>
       </header>
 
@@ -151,10 +154,10 @@ const App = () => {
                   <h2 className="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-1">Ahorro Neto (USD)</h2>
                   <p className="text-4xl font-black text-white italic leading-none">${stats.netProfit.toLocaleString()}</p>
                 </div>
-                <div className="text-green-400 font-black italic text-xl">%{stats.progressPercent.toFixed(1)}</div>
+                <div className="font-black italic text-xl text-green-400">%{stats.progressPercent.toFixed(1)}</div>
               </div>
               <div className="h-5 w-full bg-slate-800 rounded-full overflow-hidden p-1 border border-slate-700">
-                <div className="h-full bg-gradient-to-r from-red-600 via-yellow-500 to-green-500 rounded-full transition-all duration-1000" style={{ width: `${stats.progressPercent}%` }} />
+                <div className="h-full bg-gradient-to-r from-red-600 via-yellow-500 to-green-500 rounded-full transition-all duration-1000 shadow-[0_0_15px_rgba(220,38,38,0.5)]" style={{ width: `${stats.progressPercent}%` }} />
               </div>
               <div className="mt-6 flex gap-3 text-center">
                 <div className="flex-1 bg-black/40 p-4 rounded-3xl border border-slate-800/50">
@@ -171,8 +174,10 @@ const App = () => {
             <section className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 flex items-center justify-between shadow-lg">
               <div className="space-y-1">
                 <h3 className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Ritmo Semanal</h3>
-                <p className="text-3xl font-black italic">{stats.weeklyCount} <span className="text-base text-slate-600 font-normal">/ {WEEKLY_GOAL_COUNT}</span></p>
-                <p className="text-[10px] text-slate-400 font-bold italic uppercase">{stats.weeklyCount >= WEEKLY_GOAL_COUNT ? '🏁 Objetivo Semanal!' : `Faltan ${WEEKLY_GOAL_COUNT - stats.weeklyCount} para la meta`}</p>
+                <p className="text-3xl font-black italic text-white">{stats.weeklyCount} <span className="text-base text-slate-600 font-normal">/ {WEEKLY_GOAL_COUNT}</span></p>
+                <p className="text-[10px] font-bold text-slate-400 italic mt-1 uppercase">
+                  {stats.weeklyCount >= WEEKLY_GOAL_COUNT ? '🏁 ¡Meta cumplida!' : `Faltan ${WEEKLY_GOAL_COUNT - stats.weeklyCount} autos`}
+                </p>
               </div>
               <div className="relative w-20 h-20 flex items-center justify-center">
                 <svg className="absolute inset-0 w-full h-full -rotate-90">
@@ -185,12 +190,12 @@ const App = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <button onClick={() => addWash('ext')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3">
-                <div className="bg-blue-600/10 p-3 rounded-2xl"><Car className="text-blue-500" size={32} /></div>
-                <span className="font-black italic text-xl">$420</span>
+                <Car className="text-blue-500" size={32} />
+                <span className="font-black italic text-xl text-white tracking-tighter">$420</span>
               </button>
               <button onClick={() => addWash('full')} className="bg-slate-900 p-6 rounded-[2.5rem] border-b-8 border-black active:translate-y-1 active:border-b-0 transition-all flex flex-col items-center gap-3">
-                <div className="bg-green-600/10 p-3 rounded-2xl"><CheckCircle className="text-green-500" size={32} /></div>
-                <span className="font-black italic text-xl">$850</span>
+                <CheckCircle className="text-green-500" size={32} />
+                <span className="font-black italic text-xl text-white tracking-tighter">$850</span>
               </button>
             </div>
 
@@ -200,27 +205,27 @@ const App = () => {
           </>
         ) : (
           <div className="space-y-4">
-             <h2 className="text-2xl font-black italic uppercase tracking-tighter flex items-center gap-3 mb-6 px-2 leading-none">
+             <h2 className="text-2xl font-black italic uppercase flex items-center gap-3 mb-6 px-2 leading-none">
               <History className="text-red-600" /> Historial de Boxes
             </h2>
             {[...washes.map(w => ({...w, t: 'w'})), ...expenses.map(e => ({...e, t: 'e'}))]
               .sort((a,b) => b.date - a.date)
               .map(item => (
-                <div key={item.id} className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center group shadow-md">
+                <div key={item.id} className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center group shadow-md hover:bg-slate-800/50 transition-colors">
                   <div className="flex items-center gap-4">
                     <div className={`p-3 rounded-2xl ${item.t === 'w' ? 'bg-blue-600/20 text-blue-500' : 'bg-red-600/20 text-red-500'}`}>
                       {item.t === 'w' ? <Car size={24} /> : <Receipt size={24} />}
                     </div>
                     <div>
-                      <p className="font-black italic text-base uppercase leading-none">{item.description || (item.price > 500 ? 'Full Detail' : 'Exterior Solo')}</p>
-                      <p className="text-[10px] text-slate-600 font-bold mt-1 uppercase tracking-wider">{item.date.toLocaleDateString()}</p>
+                      <p className="font-black italic text-base uppercase leading-none text-white">{item.description || (item.price > 500 ? 'Full Service' : 'Exterior Solo')}</p>
+                      <p className="text-[10px] text-slate-600 font-bold mt-1 uppercase tracking-widest">{item.date.toLocaleDateString()}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 font-black italic">
                     <span className={`text-lg ${item.t === 'w' ? 'text-white' : 'text-red-500'}`}>
                       {item.t === 'w' ? '+' : '-'}${item.price || item.amount}
                     </span>
-                    <button onClick={() => deleteItem(item.id, item.t === 'w' ? 'washes' : 'expenses')} className="text-slate-700 hover:text-red-500 transition-colors p-2"><Trash2 size={18} /></button>
+                    <button onClick={() => deleteItem(item.id, item.t === 'w' ? 'washes' : 'expenses')} className="text-slate-700 hover:text-red-500 transition-all p-2"><Trash2 size={18} /></button>
                   </div>
                 </div>
               ))}
@@ -239,10 +244,10 @@ const App = () => {
       </nav>
 
       {isAddingExpense && (
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-slate-900 w-full max-w-xs rounded-[3rem] border border-slate-800 p-8 shadow-2xl overflow-hidden relative">
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900 w-full max-w-xs rounded-[3rem] border border-slate-800 p-8 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-24 h-24 bg-red-600/10 rounded-full -mr-12 -mt-12 blur-2xl"></div>
-            <h3 className="text-2xl font-black italic uppercase text-red-500 mb-6 italic tracking-tighter">Pit Stop: Nuevo Gasto</h3>
+            <h3 className="text-2xl font-black italic uppercase text-red-500 mb-6 tracking-tighter">Pit Stop: Gasto</h3>
             <form onSubmit={handleAddExpense} className="space-y-5 relative z-10">
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">¿Qué compraste?</label>
@@ -253,7 +258,7 @@ const App = () => {
                 <input type="number" placeholder="0" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white text-3xl font-black italic focus:outline-none focus:border-red-600" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
               </div>
               <div className="flex gap-4 pt-6">
-                <button type="button" onClick={() => setIsAddingExpense(false)} className="flex-1 font-black text-slate-600 uppercase text-xs tracking-widest">Cancelar</button>
+                <button type="button" onClick={() => setIsAddingExpense(false)} className="flex-1 font-black text-slate-600 uppercase text-xs tracking-widest hover:text-white transition-colors">Cancelar</button>
                 <button type="submit" className="flex-1 p-5 bg-red-700 rounded-2xl font-black text-white uppercase text-xs shadow-xl shadow-red-900/20 active:scale-95 transition-transform">Confirmar</button>
               </div>
             </form>
