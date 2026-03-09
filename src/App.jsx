@@ -8,7 +8,8 @@ import {
   Settings, Plus, Database
 } from 'lucide-react';
 
-// --- SISTEMA ANTICRASH (CAJA NEGRA) ---
+// --- 1. SISTEMA ANTICRASH (CAJA NEGRA) ---
+// Si hay un dato corrupto, en lugar de pantalla blanca mostrará este error rojo.
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -27,12 +28,11 @@ class ErrorBoundary extends Component {
         <div className="min-h-screen bg-slate-950 p-8 text-white font-sans flex flex-col justify-center">
           <AlertCircle size={64} className="text-red-500 mb-6 mx-auto" />
           <h1 className="text-3xl font-black italic uppercase text-center mb-2">Error de Sistema</h1>
-          <p className="text-center text-slate-400 text-sm mb-6">La app detectó un dato corrupto y se detuvo por seguridad.</p>
+          <p className="text-center text-slate-400 text-sm mb-6">La app detectó un dato corrupto en Firebase.</p>
           <div className="bg-red-950/30 p-5 rounded-2xl border border-red-900 overflow-auto text-xs text-red-200 font-mono">
             <p className="font-bold mb-2">{this.state.error && this.state.error.toString()}</p>
-            <p className="opacity-70">{this.state.errorInfo && this.state.errorInfo.componentStack}</p>
           </div>
-          <button onClick={() => window.location.reload()} className="mt-8 bg-red-600 p-4 rounded-xl font-black uppercase tracking-widest text-xs active:scale-95 transition-transform">
+          <button onClick={() => window.location.reload()} className="mt-8 bg-red-600 p-4 rounded-xl font-black uppercase tracking-widest text-xs">
             Reiniciar Sistema
           </button>
         </div>
@@ -42,7 +42,7 @@ class ErrorBoundary extends Component {
   }
 }
 
-// --- CONFIGURACIÓN DE FIREBASE ---
+// --- 2. CONFIGURACIÓN DE FIREBASE ---
 let firebaseConfig = null;
 try {
   const envValue = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FIREBASE_CONFIG : null;
@@ -61,19 +61,20 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'f1-detailing-lucio-v
 
 const GOAL_USD = 1000;
 
-// Utilidad para limpiar fechas corruptas
+// Utilidad para limpiar fechas corruptas y evitar pantallas blancas
 const parseSafeDate = (val) => {
   try {
     if (!val) return new Date();
     if (typeof val.toDate === 'function') return val.toDate();
     if (val instanceof Date) return val;
-    return new Date(val); // Intenta parsear si es un string viejo
+    return new Date(val); 
   } catch (e) {
     return new Date();
   }
 };
 
-const MainApp = () => {
+// --- 3. APLICACIÓN PRINCIPAL ---
+const AppContent = () => {
   const [user, setUser] = useState(null);
   const [washes, setWashes] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -89,6 +90,7 @@ const MainApp = () => {
   const [washForm, setWashForm] = useState({ type: 'Exterior', price: 420, discount: 0, tip: 0 });
   const [expenseForm, setExpenseForm] = useState({ desc: '', amount: '' });
 
+  // Autenticación
   useEffect(() => {
     if (!auth) { setLoading(false); return; }
     const initAuth = async () => {
@@ -106,6 +108,7 @@ const MainApp = () => {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
+  // Carga de Datos desde Firebase
   useEffect(() => {
     if (!user || !db) return;
 
@@ -134,7 +137,7 @@ const MainApp = () => {
         setLoading(false);
       }
     }, (err) => {
-      setError("Error de permisos: " + err.message);
+      setError("Error de base de datos (Reglas): " + err.message);
       setLoading(false);
     });
 
@@ -163,14 +166,16 @@ const MainApp = () => {
       const p = Number(w.price) || 0;
       const d = Number(w.discount) || 0;
       const t = Number(w.tip) || 0;
-      return sum + (p - d + t);
+      return sum + (p - d + t); // Venta = Precio - Descuento + Propina
     }, 0);
 
     const totalNephewPay = (washes || []).length * nepPay;
     const totalExpenses = (expenses || []).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     
+    // El ahorro neto es la caja total menos el pago a Lucio y menos los gastos en insumos
     const netProfitUYU = totalSales - totalNephewPay - totalExpenses;
     const netProfitUSD = netProfitUYU / exRate;
+    
     const progressPercent = Math.min(Math.max((netProfitUSD / GOAL_USD) * 100, 0), 100);
 
     return { 
@@ -204,11 +209,12 @@ const MainApp = () => {
     }
   };
 
+  // --- RENDERIZADO CONDICIONAL DE ESTADOS ---
   if (!hasConfig) return (
     <div className="h-screen bg-slate-950 flex flex-col items-center justify-center p-8 text-center text-white">
-      <AlertCircle size={48} className="text-red-500 mb-4" />
+      <AlertCircle size={48} className="text-red-500 mb-4 animate-bounce" />
       <h1 className="text-xl font-black italic uppercase">Falta Configuración</h1>
-      <p className="text-slate-500 text-xs mt-2">Copia el JSON de Firebase en las variables de Vercel.</p>
+      <p className="text-slate-500 text-xs mt-2">Copia el JSON de Firebase en Vercel.</p>
     </div>
   );
 
@@ -230,6 +236,7 @@ const MainApp = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-36">
+      {/* HEADER */}
       <header className="bg-red-700 p-6 rounded-b-[3.5rem] shadow-2xl border-b-4 border-black sticky top-0 z-50">
         <div className="max-w-md mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
@@ -248,13 +255,16 @@ const MainApp = () => {
         </div>
       </header>
 
+      {/* MAIN CONTENT */}
       <main className="p-4 space-y-6 max-w-md mx-auto">
         {activeTab === 'dashboard' ? (
           <>
+            {/* Meta Card USD */}
             <section className="bg-slate-900 p-7 rounded-[3rem] border border-slate-800 shadow-xl relative overflow-hidden">
-              <div className="flex justify-between items-start mb-4">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full -mr-16 -mt-16 blur-3xl opacity-50"></div>
+              <div className="flex justify-between items-start mb-4 relative z-10">
                 <div className="space-y-1">
-                  <h2 className="text-[10px] uppercase font-black text-slate-500 tracking-widest leading-none">Ahorro Neto Acumulado</h2>
+                  <h2 className="text-[10px] uppercase font-black text-slate-500 tracking-widest leading-none">Ahorro Neto</h2>
                   <p className="text-5xl font-black text-white italic tracking-tighter leading-none">
                     ${Math.round(stats.netProfitUSD)} <span className="text-sm text-slate-600 not-italic uppercase">USD</span>
                   </p>
@@ -262,7 +272,7 @@ const MainApp = () => {
                 <Trophy className="text-yellow-500" size={36} />
               </div>
 
-              <div className="space-y-3 mt-6">
+              <div className="space-y-3 mt-6 relative z-10">
                 <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
                   <span>Progreso</span>
                   <span>Meta: $1.000 USD</span>
@@ -280,17 +290,19 @@ const MainApp = () => {
               </div>
             </section>
 
+            {/* Cajas de Pesos */}
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
-                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Caja Total ($)</p>
+                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Caja Total (UYU)</p>
                 <p className="text-2xl font-black italic text-blue-400 tracking-tighter">${Math.round(stats.totalSales).toLocaleString()}</p>
               </div>
               <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800">
-                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Sueldo Lucio ($)</p>
+                <p className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Pago Lucio (UYU)</p>
                 <p className="text-2xl font-black italic text-red-500 tracking-tighter">-${Math.round(stats.totalNephewPay).toLocaleString()}</p>
               </div>
             </div>
 
+            {/* Botones */}
             <div className="grid grid-cols-2 gap-5">
               <button 
                 onClick={() => setShowWashModal(true)} 
@@ -319,14 +331,13 @@ const MainApp = () => {
               [...washes.map(w => ({...w, t: 'w'})), ...expenses.map(e => ({...e, t: 'e'}))]
                 .sort((a,b) => b.date - a.date)
                 .map(item => {
-                  // Mapeo ultra seguro de datos visuales
                   const isWash = item.t === 'w';
                   const title = isWash ? String(item.type || 'LAVADO') : String(item.description || 'GASTO');
                   const valPrice = Number(item.price) || 0;
                   const valDisc = Number(item.discount) || 0;
                   const valTip = Number(item.tip) || 0;
                   const valAmount = Number(item.amount) || 0;
-                  const displayDate = item.date instanceof Date ? item.date.toLocaleDateString() : 'FECHA INVÁLIDA';
+                  const displayDate = item.date instanceof Date ? item.date.toLocaleDateString() : '--/--/----';
                   const finalAmount = isWash ? (valPrice - valDisc + valTip) : valAmount;
 
                   return (
@@ -347,7 +358,8 @@ const MainApp = () => {
                           <span className={`block font-black italic text-xl ${isWash ? 'text-white' : 'text-red-500'}`}>
                             {isWash ? '+' : '-'}${Math.round(finalAmount)}
                           </span>
-                          {isWash && valTip > 0 && <span className="text-[9px] text-green-500 font-bold uppercase">+$ {valTip} propina</span>}
+                          {isWash && valTip > 0 && <span className="text-[9px] text-green-500 font-bold uppercase">+$ {valTip} propa</span>}
+                          {isWash && valDisc > 0 && <span className="text-[9px] text-red-400 font-bold uppercase block">-$ {valDisc} dcto</span>}
                         </div>
                         <button onClick={() => handleDelete(item.id, isWash ? 'washes' : 'expenses')} className="text-slate-800 hover:text-red-600 p-2"><Trash2 size={20} /></button>
                       </div>
@@ -359,6 +371,7 @@ const MainApp = () => {
         )}
       </main>
 
+      {/* BOTTOM NAV */}
       <nav className="fixed bottom-10 left-1/2 -translate-x-1/2 w-[90%] max-w-[360px] bg-slate-900/95 backdrop-blur-xl border border-white/10 p-5 rounded-[3rem] flex justify-around shadow-2xl z-50">
         <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-red-500 scale-110' : 'text-slate-600'}`}>
           <LayoutDashboard size={28} /><span className="text-[10px] uppercase font-black">Panel</span>
@@ -368,7 +381,7 @@ const MainApp = () => {
         </button>
       </nav>
 
-      {/* MODALES */}
+      {/* MODAL: NUEVO LAVADO */}
       {showWashModal && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
           <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10">
@@ -383,7 +396,7 @@ const MainApp = () => {
                 >Full Service</button>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio ($ UYU)</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Precio Base ($ UYU)</label>
                 <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-white font-black italic text-xl" 
                   value={washForm.price === 0 ? '' : washForm.price} 
                   onChange={e => setWashForm({...washForm, price: e.target.value === '' ? 0 : Number(e.target.value)})}/>
@@ -411,6 +424,7 @@ const MainApp = () => {
         </div>
       )}
 
+      {/* MODAL: CONFIGURACIÓN */}
       {showSettings && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
           <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10">
@@ -444,6 +458,7 @@ const MainApp = () => {
         </div>
       )}
 
+      {/* MODAL: GASTOS */}
       {showExpenseModal && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
           <div className="bg-slate-900 w-full max-w-sm rounded-[3.5rem] border border-slate-800 p-10 shadow-2xl">
@@ -478,11 +493,12 @@ const MainApp = () => {
   );
 };
 
-// Envolver la app en la Caja Negra
-const SafeApp = () => (
+// --- 4. EXPORTACIÓN SEGURA ---
+// Envolvemos todo el contenido en la Caja Negra para que nunca más haya pantalla blanca
+const App = () => (
   <ErrorBoundary>
-    <App />
+    <AppContent />
   </ErrorBoundary>
 );
 
-export default SafeApp;
+export default App;
