@@ -112,7 +112,7 @@ const AppContent = () => {
   useEffect(() => {
     if (!user || !db) return;
 
-    const configRef = doc(db, 'artifacts', appId, 'public', 'config', 'global');
+    const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
     const unsubConfig = onSnapshot(configRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -431,7 +431,7 @@ const AppContent = () => {
             <h3 className="text-2xl font-black italic uppercase text-yellow-500 mb-8 tracking-tighter leading-none">Setup Boxes</h3>
             <form onSubmit={async (e) => {
               e.preventDefault();
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'config', 'global'), {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global'), {
                 exchangeRate: Number(config.exchangeRate) || 40,
                 nephewPay: Number(config.nephewPay) || 850
               });
