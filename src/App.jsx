@@ -174,8 +174,6 @@ const AppContent = () => {
     const totalSales = washes.reduce((sum, w) => sum + (Number(w.price) || 0) - (Number(w.discount) || 0), 0);
     const totalTips = washes.reduce((sum, w) => sum + (Number(w.tip) || 0), 0);
     const totalExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const totalNephewPay = washes.length * config.priceExt; // O el pago acordado, aquí lo calculábamos según la caja. 
-    // Nota: Dejamos la variable de sueldo viejo mapeada por si acaso, pero el Prompt dice que ya configuramos los precios base.
     
     // El Net Profit que se va sumando para la meta (Caja Base - Gastos)
     const netProfitUYU = totalSales - totalExpenses;
@@ -199,24 +197,23 @@ const AppContent = () => {
     const washesThisWeek = washes.filter(w => w.date >= startOfSelectedWeek && w.date <= endOfSelectedWeek);
     const carsThisWeek = washesThisWeek.length;
 
-    // Cálculo de Ritmo Ideal (Pacing)
-    let expectedCars = weeklyGoal;
-    if (weekOffset === 0) {
-      // Si estamos a mitad de la semana actual, promediamos según qué día es
-      expectedCars = Math.round((weeklyGoal / 7) * currentDayOfWeek);
-    } else if (weekOffset > 0) {
-      expectedCars = 0; // Semanas futuras todavía no empezaron
+    // --- LÓGICA DE RITMO SEMANAL (POR SEMANA, NO POR DÍA) ---
+    let paceText = "";
+    if (weekOffset > 0) {
+      paceText = "Semana futura";
+    } else {
+      const missing = weeklyGoal - carsThisWeek;
+      if (missing > 0) {
+        paceText = `Faltan ${missing} autos`;
+      } else if (missing === 0) {
+        paceText = `✅ Ritmo ideal (Meta alcanzada)`;
+      } else {
+        paceText = `🔥 Adelantado por ${Math.abs(missing)} auto${Math.abs(missing) !== 1 ? 's' : ''}`;
+      }
     }
 
-    const paceDiff = carsThisWeek - expectedCars;
-    let paceText = "";
-    if (weekOffset > 0) paceText = "Semana futura";
-    else if (paceDiff > 0) paceText = `🔥 Adelantado por ${paceDiff} auto${paceDiff > 1 ? 's' : ''}`;
-    else if (paceDiff < 0) paceText = `⚠️ Atrasado por ${Math.abs(paceDiff)} auto${Math.abs(paceDiff) > 1 ? 's' : ''}`;
-    else paceText = `✅ Ritmo ideal`;
-
-    // --- LÓGICA DE PROYECCIÓN (ETA) ---
-    // Usamos el valor Full Service para la proyección
+    // --- LÓGICA DE PROYECCIÓN FIJA (ETA) ---
+    // Basado siempre en la meta semanal de autos y asumiendo precio Full Service
     const profitPerFullCarUYU = config.priceFull; 
     const profitPerFullCarUSD = profitPerFullCarUYU / exRate;
     const projectedWeeklyProfitUSD = profitPerFullCarUSD * weeklyGoal;
@@ -226,17 +223,17 @@ const AppContent = () => {
       etaText = "¡OBJETIVO CUMPLIDO!";
     } else if (projectedWeeklyProfitUSD > 0) {
       const weeksLeft = remainingUSD / projectedWeeklyProfitUSD;
-      const daysLeft = Math.round(weeksLeft * 7);
-      const monthsLeft = Math.floor(daysLeft / 30);
-      const remDays = daysLeft % 30;
+      const totalWeeks = Math.floor(weeksLeft);
+      const extraDays = Math.round((weeksLeft - totalWeeks) * 7);
       
       let timeParts = [];
-      if (monthsLeft > 0) timeParts.push(`${monthsLeft} mes${monthsLeft > 1 ? 'es' : ''}`);
-      if (remDays > 0 || monthsLeft === 0) timeParts.push(`${remDays} día${remDays !== 1 ? 's' : ''}`);
+      if (totalWeeks > 0) timeParts.push(`${totalWeeks} sem${totalWeeks !== 1 ? 's' : ''}`);
+      if (extraDays > 0) timeParts.push(`${extraDays} día${extraDays !== 1 ? 's' : ''}`);
+      if (timeParts.length === 0) timeParts.push('Menos de un día');
       
-      etaText = `Faltan aprox. ${timeParts.join(' y ')} para la meta`;
+      etaText = `Faltan aprox. ${timeParts.join(' y ')}`;
     } else {
-      etaText = "Rentabilidad insuficiente para proyectar";
+      etaText = "Rentabilidad insuficiente";
     }
 
     return { 
@@ -499,7 +496,7 @@ const AppContent = () => {
                             {isWash ? '+' : '-'}${Math.round(finalAmount)}
                           </span>
                           {isWash && valTip > 0 && <span className="text-[9px] text-green-500 font-bold uppercase block mt-1">+$ {valTip} propina</span>}
-                          {isWash && valDisc > 0 && <span className="text-[9px] text-red-400 font-bold uppercase block">-$ {valDisc} dcto</span>}
+                          {isWash && valDisc > 0 && <span className="text-[9px] text-red-400 font-bold uppercase block">-$ {valDisc} descuento</span>}
                         </div>
                         <button onClick={() => handleDelete(item.id, isWash ? 'washes' : 'expenses')} className="text-slate-800 hover:text-red-600 p-2"><Trash2 size={20} /></button>
                       </div>
@@ -551,13 +548,13 @@ const AppContent = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Dcto ($)</label>
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Descuento ($)</label>
                   <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-red-500 font-black italic focus:border-red-600 outline-none" 
                     value={washForm.discount === 0 ? '' : washForm.discount} 
                     onChange={e => setWashForm({...washForm, discount: e.target.value === '' ? 0 : Number(e.target.value)})}/>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Propa ($)</label>
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Propina ($)</label>
                   <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-green-500 font-black italic focus:border-red-600 outline-none" 
                     value={washForm.tip === 0 ? '' : washForm.tip} 
                     onChange={e => setWashForm({...washForm, tip: e.target.value === '' ? 0 : Number(e.target.value)})}/>
