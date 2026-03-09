@@ -1,7 +1,73 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- Fondo oscuro -->
-  <rect width="512" height="512" fill="#020617" rx="110" ry="110"/>
-  
-  <!-- Silueta de Auto F1/Deportivo en Rojo F1 -->
-  <path fill="#dc2626" d="M135.2 117.4L109.1 192H402.9l-26.1-74.6C372.3 104.6 360.2 96 346.6 96H165.4c-13.6 0-25.7 8.6-30.2 21.4zM39.6 196.8L74.8 96.3C88.3 57.8 124.6 32 165.4 32H346.6c40.8 0 77.1 25.8 90.6 64.3l35.2 100.5c23.2 9.6 39.6 32.5 39.6 59.2V400v48c0 17.7-14.3 32-32 32H448c-17.7 0-32-14.3-32-32V400H96v48c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32V400 256c0-26.7 16.4-49.6 39.6-59.2zM128 288a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zm288 32a32 32 0 1 0 0-64 32 32 0 1 0 0 64z"/>
+  <defs>
+    <!-- Gradiente de fondo oscuro y elegante -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <!-- Gradiente rojo deportivo para el auto -->
+    <linearGradient id="carGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#991b1b" />
+    </linearGradient>
+    <!-- Resplandor neón de fondo -->
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Fondo oscuro con bordes curvos -->
+  <rect width="512" height="512" fill="url(#bgGrad)" rx="110" ry="110"/>
+  <circle cx="256" cy="256" r="220" fill="url(#glow)"/>
+
+  <!-- Líneas de velocidad dinámicas -->
+  <g stroke="#334155" stroke-width="8" stroke-linecap="round" opacity="0.6">
+    <path d="M 40 140 L 160 140" />
+    <path d="M 100 200 L 220 200" />
+    <path d="M 60 380 L 180 380" />
+    <path d="M 280 420 L 400 420" />
+    <path d="M 350 100 L 450 100" />
+  </g>
+  <g stroke="#ef4444" stroke-width="6" stroke-linecap="round" opacity="0.8">
+     <path d="M 20 280 L 70 280" />
+     <path d="M 80 400 L 150 400" />
+     <path d="M 380 360 L 460 360" />
+  </g>
+
+  <!-- GRUPO DEL AUTO (Hypercar) -->
+  <g transform="translate(0, 50)">
+    <!-- Neón por debajo del chasis (Underglow) -->
+    <path d="M 120 325 L 410 325" stroke="#ef4444" stroke-width="12" stroke-linecap="round" filter="blur(6px)" opacity="0.7"/>
+
+    <!-- Estructura del Alerón Trasero Gigante -->
+    <path fill="#020617" d="M 80,210 L 70,140 L 90,140 L 100,210 Z" />
+    <path fill="#ef4444" d="M 30,130 L 140,150 L 130,160 L 20,140 Z" />
+    <path fill="#b91c1c" d="M 30,120 L 40,170 L 20,160 Z" />
+
+    <!-- Carrocería Cyberpunk (Líneas rectas, techo muy bajo) -->
+    <path fill="url(#carGrad)" d="M 60,270 L 60,210 L 150,160 L 200,150 L 260,150 L 360,210 L 450,230 L 490,260 L 480,290 L 430,290 L 420,230 L 360,230 L 350,290 L 190,290 L 180,230 L 100,230 L 90,290 L 60,290 Z" />
+    
+    <!-- Ventanas polarizadas -->
+    <path fill="#020617" d="M 170,175 L 255,165 L 340,210 L 170,210 Z" />
+    
+    <!-- Splitter Frontal (Alerón de adelante) -->
+    <path fill="#b91c1c" d="M 460,290 L 510,290 L 500,295 L 460,295 Z" />
+
+    <!-- Foco Delantero (Angular y Brillante) -->
+    <path fill="#fca5a5" d="M 440,235 L 480,260 L 450,260 Z" filter="blur(4px)" opacity="0.9"/>
+    <path fill="#ffffff" d="M 440,235 L 480,260 L 450,260 Z" />
+
+    <!-- Luz Trasera Roja -->
+    <path fill="#fca5a5" d="M 60,220 L 60,240 L 70,240 Z" filter="blur(4px)"/>
+    <path fill="#ffffff" d="M 60,220 L 60,240 L 70,240 Z" />
+
+    <!-- Rueda Trasera y Llanta -->
+    <circle cx="140" cy="290" r="35" fill="#0f172a" stroke="#ef4444" stroke-width="6"/>
+    <circle cx="140" cy="290" r="15" fill="#e2e8f0"/>
+    
+    <!-- Rueda Delantera y Llanta -->
+    <circle cx="390" cy="290" r="35" fill="#0f172a" stroke="#ef4444" stroke-width="6"/>
+    <circle cx="390" cy="290" r="15" fill="#e2e8f0"/>
+  </g>
 </svg>
